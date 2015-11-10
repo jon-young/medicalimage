@@ -10,6 +10,7 @@ import numpy as np
 import SimpleITK as sitk
 import sys
 from os.path import expanduser, join
+from scipy.spatial.distance import euclidean
 
 
 def sitk_show(img):
@@ -35,17 +36,28 @@ def sitk_show(img):
     plt.show()
 
 
+def read_dicom():
+    """Read in DICOM series"""
+    dicomPath = join(expanduser('~'), 'Documents', 'SlicerDICOMDatabase', 
+                     'TCIALocal', '0', 'images', '')
+    reader = sitk.ImageSeriesReader()
+    seriesIDread = reader.GetGDCMSeriesIDs(dicomPath)[1]
+    dicomFilenames = reader.GetGDCMSeriesFileNames(dicomPath, seriesIDread)
+    reader.SetFileNames(dicomFilenames)
+    return reader.Execute()
+    
+
 def anisotropic_diffusion(img, *args):
     """INPUT: arguments are time step; conductance; # of iterations"""
     imgRecast = sitk.Cast(img, sitk.sitkFloat32)
     timeStep_ = args[0]
-    condP = args[1]
-    num_ = args[2]
-    imgSmooth = sitk.CurvatureAnisotropicDiffusion(image1=imgRecast, 
-                                                   timeStep=timeStep_, 
-                                                   conductanceParameter=condP, 
-                                                   numberOfIterations=num_)
-    return imgSmooth
+    conduct = args[1]
+    numIter = args[2]
+    curvDiff = sitk.CurvatureAnisotropicDiffusionImageFilter()
+    curvDiff.SetTimeStep(timeStep_)
+    curvDiff.SetConductanceParameter(conduct)
+    curvDiff.SetNumberOfIterations(numIter)
+    return curvDiff.Execute(imgRecast)
 
 
 def gradient_magnitude(img, sigma_):
@@ -60,31 +72,27 @@ def sigmoid_filter(img, K1, K2):
     return imgSigmoid
 
 
+def input_level_set(featImg, seed2radius):
+    setupImg = sitk.Image(featImg.GetSize()[0], featImg.GetSize()[1], sitk.sitkUInt8)
+    X = sitk.GetArrayFromImage(setupImg)
+
+    for s in seed2radius.keys():
+        rowIni, rowEnd = s[0] - seed2radius[s], s[0] + seed2radius[s]
+        colIni, colEnd = s[1] - seed2radius[s], s[1] + seed2radius[s]
+        for i in range(rowIni, rowEnd+1):
+            for j in range(colIni, colEnd+1):
+                if euclidean((i,j), s) <= seed2radius[s]:
+                    X[i,j] = 1
+    
+    img = sitk.Cast(sitk.GetImageFromArray(X), featImg.GetPixelIDValue()) * -1 + 0.5
+    img.SetSpacing(featImg.GetSpacing())
+    img.SetOrigin(featImg.GetOrigin())
+    img.SetDirection(featImg.GetDirection())
+    return img
+
+
 def fast_marching(img, seeds, stop):
     return sitk.FastMarching(image1=img, trialPoints=seeds, stoppingValue=stop)
-
-
-def distance_mapping(img, seeds):
-    seedImg = sitk.Image(img.GetSize()[0], img.GetSize()[1], sitk.sitkUInt8)
-    seedImg.SetSpacing(img.GetSpacing())
-    seedImg.SetOrigin(img.GetOrigin())
-    seedImg.SetDirection(img.GetDirection())
-    for s in seeds:
-        seedImg[s] = 1
-    
-    distance = sitk.SignedMaurerDistanceMapImageFilter()
-    distance.InsideIsPositiveOff()
-    distance.UseImageSpacingOn()
-    return distance.Execute(seedImg)
-
-
-def input_level_set(imgSigmoid, imgDist, lowThresh, upThresh):
-    """INPUT:
-    1.) imgSigmoid <- feature image
-    2.) imgDist <- image from distance mapping
-    3.) lowThresh, upThresh <- limits for binary threshold"""
-    initImg = sitk.BinaryThreshold(imgDist, lowThresh, upThresh)
-    return sitk.Cast(initImg, imgSigmoid.GetPixelIDValue()) * -1 + 0.5
 
 
 def shape_detection(imgInit, imgSigmoid, *args):
@@ -131,13 +139,7 @@ def binary_threshold(img, lowerThreshold_, upperThreshold_):
 def main():
     # read in DICOM images    
     sliceNum = int(sys.argv[1])
-    dicomPath = join(expanduser('~'), 'Documents', 'SlicerDICOMDatabase', 
-                     'TCIALocal', '0', 'images', '')
-    reader = sitk.ImageSeriesReader()
-    seriesIDread = reader.GetGDCMSeriesIDs(dicomPath)[1]
-    dicomFilenames = reader.GetGDCMSeriesFileNames(dicomPath, seriesIDread)
-    reader.SetFileNames(dicomFilenames)
-    imgSeries = reader.Execute()
+    imgSeries = read_dicom()
     imgSlice = imgSeries[:,:,sliceNum]
     imgSliceUInt8 = sitk.Cast(sitk.RescaleIntensity(imgSlice), sitk.sitkUInt8)
     print('\nDisplaying image slice...')
@@ -150,7 +152,7 @@ def main():
         print('1 - Curvature Anisotropic Diffusion')
         print('2 - Recursive Gaussian IIR')
         print('3 - Median')
-        ans = input()
+        ans = int(input())
 
     if ans == 1:
         anisoParams = (0.06, 9.0, 5)
@@ -160,8 +162,8 @@ def main():
     elif ans == 2:
         recurGaussX = sitk.RecursiveGaussianImageFilter()
         recurGaussY = sitk.RecursiveGaussianImageFilter()
-        recurGaussX.SetSigma(2.0)
-        recurGaussY.SetSigma(2.0)
+        recurGaussX.SetSigma(1.0)
+        recurGaussY.SetSigma(1.0)
         recurGaussY.SetDirection(1)
         imgFilter = recurGaussY.Execute(recurGaussX.Execute(imgSlice))
         print('\nDisplaying recursive Gaussian-filtered image...')
@@ -174,7 +176,7 @@ def main():
         sitk_show(imgFilter)
     
     # compute edge potential with gradient magnitude recursive Gaussian
-    sigma = 2.0
+    sigma = 3.0
     imgGauss = gradient_magnitude(imgFilter, sigma)
     print('\nImage from gradient magnitude recursive Gaussian:')
     sitk_show(imgGauss)
@@ -186,14 +188,22 @@ def main():
     print('\nDisplaying feature image...')
     sitk_show(imgSigmoid)
     
-    # read in user-supplied seeds
+    # get seeds and radii from user
     numSeeds = int(input('Enter the desired number of seeds: '))
-    seeds = list()
+    seed2radius = dict()
     for i in range(numSeeds):
         coord = input('Enter x- and y-coordinates separated by a comma: ')
-        seeds.append(tuple([int(n) for n in coord.split(',')]))
+        radius = int(input('Enter desired radius of the seed: '))
+        seedTuple = tuple([int(n) for n in reversed(coord.split(','))])
+        seed2radius[seedTuple] = radius
     
-    # segmentation by fast marching    
+    # create input level set
+    initImg = input_level_set(imgSigmoid, seed2radius)
+    print('\nDisplaying input level set...')
+    sitk_show(initImg)
+    
+    # segmentation by fast marching
+    seeds = list(seed2radius.keys())
     stopVal = int(input('Enter the stopping value: '))
     fastMarch = fast_marching(imgSigmoid, seeds, stopVal)
     print('\nDisplaying label image:')
@@ -204,27 +214,9 @@ def main():
     print('\nResult of fast marching segmentation:')
     sitk_show(sitk.LabelOverlay(imgSliceUInt8, binaryThresh, backgroundValue=255))
     
-    # create image from distance mapping
-    imgDist = distance_mapping(imgSlice, seeds)
-    
-    # get upper & lower limits within radii of seeds
-    upThresh = -1e6
-    X_dist = sitk.GetArrayFromImage(imgDist)
-    for s in seeds:
-        r = int(input('Enter the desired radius of the seed at %s: ' %(s,)))
-        candUpThresh = float(np.amax(X_dist[s[1]-r:s[1]+r, s[0]-r:s[0]+r]))
-        if candUpThresh > upThresh:
-            upThresh = candUpThresh
-    lowThresh = 0.0
-    
-    # get input level set    
-    imgInit = input_level_set(imgSigmoid, imgDist, lowThresh, upThresh)
-    print('\nDisplaying input level set...')
-    sitk_show(imgInit)
-    
     # shape detection segmentation
     shapeParams = (0.02, 1.0, 0.2, 500)
-    imgShape = shape_detection(imgInit, imgSigmoid, *shapeParams)
+    imgShape = shape_detection(initImg, imgSigmoid, *shapeParams)
     print('\nDisplaying label image:')
     sitk_show(imgShape)
     labelLowThresh = float(input('Enter lower threshold from label image: '))
@@ -235,7 +227,7 @@ def main():
     
     # segmentation with geodesic active contours
     gacParams = (1.0, 0.2, 4.0, 0.01, 600)
-    imgGac = geodesic_active_contour(imgInit, imgSigmoid, *gacParams)
+    imgGac = geodesic_active_contour(initImg, imgSigmoid, *gacParams)
     print('\nDisplaying label image:')
     sitk_show(imgGac)
     labelLowThresh = float(input('Enter lower threshold from label image: '))
