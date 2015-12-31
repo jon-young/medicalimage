@@ -41,3 +41,32 @@ class IndexTracker(object):
         self.im.set_data(self.X[self.ind, :, :])
         self.ax.set_title('slice %s' %self.ind)
         self.im.axes.figure.canvas.draw()
+
+
+class IndexTracker2(object):
+    def __init__(self, ax, X, Xover):
+        self.ax = ax
+        self.X = X
+        self.Xover = Xover
+        self.slices = X.shape[0]
+        self.ind = 0
+        
+        self.im = ax.imshow(X[self.ind,:,:], cmap=plt.cm.Greys_r)
+        self.imOver = ax.imshow(Xover[self.ind,:,:], alpha=0.5)
+        self.update()
+        
+    def onscroll(self, event):
+        if event.button == 'up':
+            self.ind = np.clip(self.ind+1, 0, self.slices-1)
+        else:
+            self.ind = np.clip(self.ind-1, 0, self.slices-1)
+
+        self.update()
+    
+    def update(self):
+        self.im.set_data(self.X[self.ind,:,:])
+        self.imOver.set_data(self.Xover[self.ind,:,:])
+        self.ax.set_title('slice %s' %self.ind)
+        self.im.axes.figure.canvas.draw()
+        self.imOver.axes.figure.canvas.draw()
+
