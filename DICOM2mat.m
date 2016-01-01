@@ -1,4 +1,4 @@
-function img = DICOM2mat(dicomDir)
+function [img, slice2name] = DICOM2mat(dicomDir)
 %
 % Iteratively read in a series of DICOM images into .mat file
 % 
