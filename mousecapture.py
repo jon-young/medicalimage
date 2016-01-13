@@ -42,8 +42,8 @@ class Seeds(object):
         if type(self.shape) is int:
             shapedraw = plt.Circle((ix, iy), self.shape, color='r')
         else:
-            shapedraw = plt.arrow(ix, iy, 5, 5, color='r')
-        plt.gcf().gca().add_artist(shapedraw)
+            shapedraw = plt.annotate('', xy=(ix,iy), xytext=(ix,iy+10), 
+                    arrowprops=dict(arrowstyle='->', color='r'))
         self.shapeRecord.append(shapedraw)
         self.im.axes.figure.canvas.draw()
 
