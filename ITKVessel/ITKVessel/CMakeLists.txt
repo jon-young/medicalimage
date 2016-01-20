@@ -5,7 +5,8 @@ project(ITKVessel)
 # Find ITK.
 find_package(ITK REQUIRED)
 include(${ITK_USE_FILE})
+include_directories(/Users/jyoung/ITK/InsightToolKit/Modules/Nonunit/Review/include)
 
-add_executable(satofilter satofilter.cpp)
+add_executable(frangifilter frangifilter.cpp)
 
-target_link_libraries(satofilter ${ITK_LIBRARIES})
+target_link_libraries(frangifilter ${ITK_LIBRARIES})
