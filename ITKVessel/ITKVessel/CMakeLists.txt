@@ -5,7 +5,7 @@ project(ITKVessel)
 # Find ITK.
 find_package(ITK REQUIRED)
 include(${ITK_USE_FILE})
-include_directories(/Users/jyoung/ITK/InsightToolKit/Modules/Nonunit/Review/include)
+include_directories(~/ITK/InsightToolKit/Modules/Nonunit/Review/include)
 
 add_executable(frangifilter frangifilter.cpp)
 
