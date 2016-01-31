@@ -57,23 +57,7 @@ The intent for writing to DICOM was to use OsiriX's region growing method and in
 
 As a result, the method to resort to next is fast marching, which shows initial promise in testing on a portion of the portal vein. Modifications have been made to *imgscroll* to have a single class handle single image display and image overlays. A function in *imgscroll* now handles the plotting calls. Previous comparisons to `None` are replaced with checking the variable type and warnings about "converting a masked element to nan" have been temporarily resolved with explicitly setting `vmin` to 0.0 and `vmax` to the fast marching stopping value.
 
-To capture seed points from mouse clicks, code from the `IndexMouseCapture` class in *Liver Segmentation 3D.ipynb* will be adapted to a new standalone importable script *mousecapture.py* that can display either a circle or arrow at the seed. For some currently unknown reason, *mousecapture.py* does not work properly in the Jupyter notebook but works in an IPython terminal. Code will be recorded below:
-
-    frangipath = os.path.join('Liver Segmentation Data', 'TCGA-BC-4073', 'frangi_filtered')
-    reader = sitk.ImageSeriesReader()
-    franginames = reader.GetGDCMSeriesFileNames(frangipath)
-    reader.SetFileNames(franginames)
-    frangi = reader.Execute()
-    I = sitk.GetArrayFromImage(frangi)
-    I01 = I/255
-    img01 = sitk.GetImageFromArray(I01)
-    img01.CopyInformation(frangi)
-    seeds = mousecapture.get_seeds(img01)
-    fastmarch = sitk.FastMarchingImageFilter()
-    fastmarch.SetTrialPoints(seeds)
-    fastmarch.SetStoppingValue(10.0)
-    imgfm = fastmarch.Execute(img01)
-    imgscroll.show_imgs(img01, imgfm)
+To capture seed points from mouse clicks, code from the `IndexMouseCapture` class in *Liver Segmentation 3D.ipynb* will be adapted to a new standalone importable script *mousecapture.py* that can display either a circle or arrow at the seed. For some currently unknown reason, *mousecapture.py* does not work properly in the Jupyter notebook but works in an IPython terminal.
 
 It is important to note that at this point, the fast marching stopping value is also hard-coded into the *imgscroll* script for overlaying the segmentation result.
 
@@ -81,7 +65,7 @@ It is important to note that at this point, the fast marching stopping value is 
 
 Writing C++ code using ITK has begun in order to use the available Hessian-based filters. The source files *satofilter.cpp* and *frangifilter.cpp* have been created and CMake is used for compilation. Compilation instructions are gathered in a *README.md* file under the *ITKVessel/* directory. First steps have been taken to successfully read in a DICOM series, extract a region-of-interest, and write an output image *ROI.mha* on 16 January. The 1<sup>st</sup> working version of the Antiga (Frangi-based) filter was achieved on 20 January.
 
-**2016 January 28-29**
+**2016 January 28-30**
 
 The 1<sup>st</sup> working version of *frangifilter.cpp* included code to extract an ROI. It has been decided that this code will be moved to a stand-alone, separate file *extractROI.cpp*, which will be executed to write *ROI.mha* again. The directory location of *extractROI.cpp* is *Medical Imaging*, which also contains an accompanying CMake file *CMakeLists.txt*. The compilation proceeds as follows:
 
@@ -102,4 +86,21 @@ and the image coordinates to extract the ROI are:
 
 First working version of *satofilter.cpp* achieved, setting &sigma; to either 1.0 or 2.0 and using the default parameter values of &alpha;<sub>1</sub> = 0.5 and &alpha;<sub>2</sub> = 2.0. At &sigma; = 1.0, there appear to be many artifacts and the vessels are not clearly shown or visible. At &sigma; = 2.0, the method appears to be a bit strict, where regions of vessels do not survive the filtering.
 
-*frangifilter.cpp* has been modified by removing the code to extract a ROI. Both *satofilter.cpp* and *frangifilter.cpp* now read in a single image file instead of of a directory of images. *frangifilter.cpp* was re-run to write out *frangiresult.mha*. The parameters used were &alpha; = 0.25, &beta; = 0.6, &gamma; = 20.0, &sigma;<sub>min</sub> = 1.0, &sigma;<sub>max</sub> = 4.0, and number of &sigma; steps = 4. 
+*frangifilter.cpp* has been modified by removing the code to extract a ROI. Both *satofilter.cpp* and *frangifilter.cpp* now read in a single image file instead of of a directory of images. *frangifilter.cpp* was re-run to write out *frangiresult.mha*. The parameters used were &alpha; = 0.25, &beta; = 0.6, &gamma; = 20.0, &sigma;<sub>min</sub> = 1.0, &sigma;<sub>max</sub> = 4.0, and number of &sigma; steps = 4. Also tried &alpha; = &beta; = 0.5; no really obvious differences, though.
+
+As *frangifilter.cpp* includes the rescale intensity image filter, the output has values from 0 - 255. The task now is to use *mousecapture.py* and fast marching to extract the vessels of interest. In addition, the fast marching result is passed to a binary threshold filter and then written out as a label map:
+
+    frangipath = os.path.join('ITKVessel', 'frangiresult.mha')
+    frangi = sitk.ReadImage(frangipath)
+    seeds = mousecapture.get_seeds(frangi)
+    fastmarch = sitk.FastMarchingImageFilter()
+    fastmarch.SetTrialPoints(seeds)
+    stopVal = 1.0
+    fastmarch.SetStoppingValue(stopVal)
+    imgFm = fastmarch.Execute(frangi)
+    img01 = sitk.BinaryThreshold(image1=imgFm, upperThreshold=stopVal)
+    imgscroll.show_imgs(frangi, img01)
+	writepath = os.path.join('Liver Segmentation Data', 'TCGA-BC-4073', 'vesselLabelMap.mha')
+	sitk.WriteImage(img01, writepath)
+
+To cover the portal and hepatic veins, seeds have been placed @ (143, 149, 15), (154, 150, 36), (125, 172, 33), (143, 115, 27), (109, 140, 27). 
